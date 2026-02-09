@@ -3,9 +3,16 @@
 #include <iostream>
 #include <algorithm>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 constexpr int WIDTH = 1280;
 constexpr int HEIGHT = 720;
 constexpr double PI = 3.1415926538;
+
+// Global space background texture
+unsigned char* spaceImage = nullptr;
+int spaceWidth = 0, spaceHeight = 0, spaceChannels = 0;
 
 // Settings
 double camR = 30.0;
@@ -173,12 +180,34 @@ bool stopCondition(const Vec4& pos) {
     return r < 1.0 + std::sqrt(1.0 - a*a) || r > std::max(2.0*camR, 30.0);
 }
 
-// Procedural checkerboard sky
+// Realistic space background from texture
 Vec3 skyTexture(const Vec3& dir) {
-    double u = 0.5 + std::atan2(dir.y, dir.x) / (2.0*PI);
-    double v = 0.5 - std::asin(dir.z) / PI;
-    int check = (int(std::floor(u*20)) ^ int(std::floor(v*10))) & 1;
-    return check ? Vec3{0.9,0.9,0.9} : Vec3{0.1,0.1,0.1};
+    if (!spaceImage) {
+        // Fallback to checkerboard if image failed to load
+        double u = 0.5 + std::atan2(dir.y, dir.x) / (2.0*PI);
+        double v = 0.5 - std::asin(dir.z) / PI;
+        int check = (int(std::floor(u*20)) ^ int(std::floor(v*10))) & 1;
+        return check ? Vec3{0.9,0.9,0.9} : Vec3{0.1,0.1,0.1};
+    }
+    
+    // Convert 3D direction to spherical coordinates
+    double u = 0.5 + std::atan2(dir.y, dir.x) / (2.0 * PI);
+    double v = 0.5 - std::asin(std::fmax(-1.0, std::fmin(1.0, dir.z))) / PI;
+    
+    // Sample texture
+    int px = int(u * spaceWidth) % spaceWidth;
+    int py = int(v * spaceHeight) % spaceHeight;
+    
+    if (px < 0) px += spaceWidth;
+    if (py < 0) py += spaceHeight;
+    
+    int idx = (py * spaceWidth + px) * spaceChannels;
+    
+    return Vec3{
+        spaceImage[idx + 0] / 255.0,
+        spaceImage[idx + 1] / 255.0,
+        spaceImage[idx + 2] / 255.0
+    };
 }
 
 // Procedural disk texture
@@ -263,6 +292,14 @@ Vec3 mainImage(int px, int py, double iTime) {
 }
 
 int main() {
+    // Load space background image
+    spaceImage = stbi_load("space_background.jpg", &spaceWidth, &spaceHeight, &spaceChannels, 3);
+    if (!spaceImage) {
+        std::cerr << "Warning: Failed to load space_background.jpg, using fallback\n";
+    } else {
+        std::cout << "Loaded space background: " << spaceWidth << "x" << spaceHeight << "\n";
+    }
+    
     std::ofstream out("kerr_hamiltonian.ppm", std::ios::binary);
     out << "P6\n" << WIDTH << " " << HEIGHT << "\n255\n";
     
@@ -279,6 +316,12 @@ int main() {
     }
     
     out.close();
+    
+    // Free image memory
+    if (spaceImage) {
+        stbi_image_free(spaceImage);
+    }
+    
     std::cout << "Rendered kerr_hamiltonian.ppm\n";
     return 0;
 }
